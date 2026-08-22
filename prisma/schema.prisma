@@ -1,0 +1,120 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// SQLite has no native enum support, so Role is a plain string constrained
+// in application code to "PLAYER" | "DM" (see src/types/next-auth.d.ts).
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  username     String   @unique
+  passwordHash String
+  role         String   @default("PLAYER")
+  isScribe     Boolean  @default(false)
+  createdAt    DateTime @default(now())
+
+  character    Character?
+  sessionPosts SessionPost[]
+  comments     Comment[]
+}
+
+model Character {
+  id       String @id @default(cuid())
+  userId   String @unique
+  user     User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  name       String
+  race       String
+  class      String
+  background String?
+  bio        String?
+  avatarUrl  String?
+
+  level            Int @default(1)
+  xp               Int @default(0)
+  proficiencyBonus Int @default(2)
+
+  maxHP     Int @default(10)
+  currentHP Int @default(10)
+  tempHP    Int @default(0)
+  armorClass Int @default(10)
+  speed     Int @default(30)
+
+  strength     Int @default(10)
+  dexterity    Int @default(10)
+  constitution Int @default(10)
+  intelligence Int @default(10)
+  wisdom       Int @default(10)
+  charisma     Int @default(10)
+
+  gold         Int     @default(0)
+  isGoldPublic Boolean @default(true)
+
+  pendingLevelUp   Boolean @default(false)
+  levelUpChecklist String? // JSON string: { label: string, done: boolean }[]
+
+  gear Gear[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Gear {
+  id          String  @id @default(cuid())
+  characterId String
+  character   Character @relation(fields: [characterId], references: [id], onDelete: Cascade)
+
+  name        String
+  quantity    Int     @default(1)
+  description String?
+  equipped    Boolean @default(false)
+
+  createdAt DateTime @default(now())
+}
+
+model SessionPost {
+  id            String   @id @default(cuid())
+  title         String
+  sessionNumber Int?
+  content       String
+  authorId      String
+  author        User     @relation(fields: [authorId], references: [id])
+
+  images   SessionImage[]
+  comments Comment[]
+
+  createdAt DateTime @default(now())
+}
+
+model SessionImage {
+  id      String      @id @default(cuid())
+  postId  String
+  post    SessionPost @relation(fields: [postId], references: [id], onDelete: Cascade)
+  url     String
+  caption String?
+}
+
+model Comment {
+  id       String      @id @default(cuid())
+  postId   String
+  post     SessionPost @relation(fields: [postId], references: [id], onDelete: Cascade)
+  authorId String
+  author   User        @relation(fields: [authorId], references: [id])
+  content  String
+
+  images CommentImage[]
+
+  createdAt DateTime @default(now())
+}
+
+model CommentImage {
+  id        String  @id @default(cuid())
+  commentId String
+  comment   Comment @relation(fields: [commentId], references: [id], onDelete: Cascade)
+  url       String
+}
