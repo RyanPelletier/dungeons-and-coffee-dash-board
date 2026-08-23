@@ -1,11 +1,33 @@
 "use client";
 
 import { useRef, useState } from "react";
-import { getDownloadURL, ref, uploadBytes } from "firebase/storage";
-import { storage } from "@/lib/firebase";
 
 const ALLOWED_TYPES = ["image/png", "image/jpeg", "image/gif", "image/webp"];
 const MAX_BYTES = 8 * 1024 * 1024; // 8MB
+
+const CLOUD_NAME = process.env.NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME;
+const UPLOAD_PRESET = process.env.NEXT_PUBLIC_CLOUDINARY_UPLOAD_PRESET;
+
+async function uploadToCloudinary(file: File): Promise<string> {
+  if (!CLOUD_NAME || !UPLOAD_PRESET) {
+    throw new Error("Image uploads aren't configured (missing Cloudinary env vars).");
+  }
+  const formData = new FormData();
+  formData.append("file", file);
+  formData.append("upload_preset", UPLOAD_PRESET);
+  formData.append("folder", "sessionImages");
+
+  const res = await fetch(`https://api.cloudinary.com/v1_1/${CLOUD_NAME}/image/upload`, {
+    method: "POST",
+    body: formData,
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body?.error?.message || "Upload failed");
+  }
+  const data = await res.json();
+  return data.secure_url as string;
+}
 
 export default function ImageUploader({
   urls,
@@ -33,13 +55,9 @@ export default function ImageUploader({
         continue;
       }
       try {
-        const path = `sessionImages/${crypto.randomUUID()}-${file.name}`;
-        const fileRef = ref(storage, path);
-        await uploadBytes(fileRef, file, { contentType: file.type });
-        const url = await getDownloadURL(fileRef);
-        newUrls.push(url);
-      } catch {
-        setError("Upload failed");
+        newUrls.push(await uploadToCloudinary(file));
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Upload failed");
       }
     }
     onChange([...urls, ...newUrls]);
