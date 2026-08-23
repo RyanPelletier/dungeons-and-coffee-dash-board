@@ -1,19 +1,46 @@
-import { getServerSession } from "next-auth";
-import { redirect } from "next/navigation";
-import { authOptions } from "@/lib/auth";
-import { prisma } from "@/lib/prisma";
+"use client";
+
+import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
+import { collection, doc, onSnapshot, orderBy, query } from "firebase/firestore";
+import { db } from "@/lib/firebase";
+import { useAuth } from "@/components/AuthProvider";
 import CharacterSheetForm from "@/components/CharacterSheetForm";
+import type { CharacterDoc, GearItem } from "@/lib/types";
 
-export const dynamic = "force-dynamic";
+export default function DashboardPage() {
+  const { firebaseUser, loading } = useAuth();
+  const router = useRouter();
+  const [character, setCharacter] = useState<CharacterDoc | null>(null);
+  const [gear, setGear] = useState<GearItem[]>([]);
+  const [characterLoading, setCharacterLoading] = useState(true);
 
-export default async function DashboardPage() {
-  const session = await getServerSession(authOptions);
-  if (!session) redirect("/login");
+  useEffect(() => {
+    if (!loading && !firebaseUser) router.push("/login");
+  }, [loading, firebaseUser, router]);
 
-  const character = await prisma.character.findUnique({
-    where: { userId: session.user.id },
-    include: { gear: { orderBy: { createdAt: "asc" } } },
-  });
+  useEffect(() => {
+    if (!firebaseUser) return;
+    const unsub = onSnapshot(doc(db, "characters", firebaseUser.uid), (snap) => {
+      setCharacter(snap.exists() ? (snap.data() as CharacterDoc) : null);
+      setCharacterLoading(false);
+    });
+    return unsub;
+  }, [firebaseUser]);
+
+  useEffect(() => {
+    if (!firebaseUser) return;
+    const q = query(collection(db, "characters", firebaseUser.uid, "gear"), orderBy("createdAt", "asc"));
+    const unsub = onSnapshot(q, (snap) => {
+      setGear(snap.docs.map((d) => ({ id: d.id, ...d.data() }) as GearItem));
+    });
+    return unsub;
+  }, [firebaseUser]);
+
+  if (loading || (firebaseUser && characterLoading)) {
+    return <p className="text-parchment/60">Loading your character...</p>;
+  }
+  if (!firebaseUser) return null;
 
   if (!character) {
     return (
@@ -28,7 +55,7 @@ export default async function DashboardPage() {
   return (
     <div>
       <h1 className="mb-6 font-display text-3xl font-bold text-gold">My Character</h1>
-      <CharacterSheetForm initialCharacter={character} />
+      <CharacterSheetForm character={character} gear={gear} />
     </div>
   );
 }

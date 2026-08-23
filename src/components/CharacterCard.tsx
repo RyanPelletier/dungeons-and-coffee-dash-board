@@ -1,24 +1,7 @@
 import HPBar from "./HPBar";
+import type { CharacterDoc } from "@/lib/types";
 
-export type DashboardCharacter = {
-  id: string;
-  name: string;
-  race: string;
-  class: string;
-  background: string | null;
-  bio: string | null;
-  level: number;
-  currentHP: number;
-  maxHP: number;
-  armorClass: number;
-  gold: number;
-  isGoldPublic: boolean;
-  avatarUrl: string | null;
-  pendingLevelUp: boolean;
-  playerName: string;
-};
-
-export default function CharacterCard({ character }: { character: DashboardCharacter }) {
+export default function CharacterCard({ character }: { character: CharacterDoc }) {
   return (
     <div className="card flex flex-col gap-3 p-5">
       <div className="flex items-start gap-3">
@@ -42,7 +25,7 @@ export default function CharacterCard({ character }: { character: DashboardChara
           <p className="text-sm text-parchment/70">
             Level {character.level} {character.race} {character.class}
           </p>
-          <p className="text-xs text-parchment/50">Played by {character.playerName}</p>
+          <p className="text-xs text-parchment/50">Played by {character.ownerUsername}</p>
         </div>
       </div>
 

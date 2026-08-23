@@ -1,42 +1,59 @@
 "use client";
 
-import { useCallback, useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useState } from "react";
+import { doc, serverTimestamp, updateDoc } from "firebase/firestore";
+import { db } from "@/lib/firebase";
 import HPBar from "./HPBar";
-import GearList, { GearItem } from "./GearList";
+import GearList from "./GearList";
 import LevelUpChecklist from "./LevelUpChecklist";
-import type { LevelUpChecklistItem } from "@/lib/levelUpSteps";
+import type { CharacterDoc, GearItem } from "@/lib/types";
 
-export type FullCharacter = {
-  id: string;
-  name: string;
-  race: string;
-  class: string;
-  background: string | null;
-  bio: string | null;
-  avatarUrl: string | null;
-  level: number;
-  xp: number;
-  proficiencyBonus: number;
-  maxHP: number;
-  currentHP: number;
-  tempHP: number;
-  armorClass: number;
-  speed: number;
-  strength: number;
-  dexterity: number;
-  constitution: number;
-  intelligence: number;
-  wisdom: number;
-  charisma: number;
-  gold: number;
-  isGoldPublic: boolean;
-  pendingLevelUp: boolean;
-  levelUpChecklist: string | null;
-  gear: GearItem[];
-};
+type EditableFields = Pick<
+  CharacterDoc,
+  | "name"
+  | "race"
+  | "class"
+  | "background"
+  | "bio"
+  | "avatarUrl"
+  | "currentHP"
+  | "maxHP"
+  | "tempHP"
+  | "armorClass"
+  | "speed"
+  | "strength"
+  | "dexterity"
+  | "constitution"
+  | "intelligence"
+  | "wisdom"
+  | "charisma"
+  | "gold"
+  | "isGoldPublic"
+>;
 
-const ABILITY_SCORES: { key: keyof FullCharacter; label: string }[] = [
+const EDITABLE_KEYS: (keyof EditableFields)[] = [
+  "name",
+  "race",
+  "class",
+  "background",
+  "bio",
+  "avatarUrl",
+  "currentHP",
+  "maxHP",
+  "tempHP",
+  "armorClass",
+  "speed",
+  "strength",
+  "dexterity",
+  "constitution",
+  "intelligence",
+  "wisdom",
+  "charisma",
+  "gold",
+  "isGoldPublic",
+];
+
+const ABILITY_SCORES: { key: keyof EditableFields; label: string }[] = [
   { key: "strength", label: "STR" },
   { key: "dexterity", label: "DEX" },
   { key: "constitution", label: "CON" },
@@ -50,85 +67,62 @@ function modifier(score: number) {
   return mod >= 0 ? `+${mod}` : `${mod}`;
 }
 
-export default function CharacterSheetForm({ initialCharacter }: { initialCharacter: FullCharacter }) {
-  const router = useRouter();
-  const [character, setCharacter] = useState(initialCharacter);
+function pickEditable(character: CharacterDoc): EditableFields {
+  const draft = {} as EditableFields;
+  for (const key of EDITABLE_KEYS) {
+    (draft as Record<string, unknown>)[key] = character[key];
+  }
+  return draft;
+}
+
+export default function CharacterSheetForm({
+  character,
+  gear,
+}: {
+  character: CharacterDoc;
+  gear: GearItem[];
+}) {
+  const [draft, setDraft] = useState<EditableFields>(() => pickEditable(character));
   const [saving, setSaving] = useState(false);
   const [savedAt, setSavedAt] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const checklist: LevelUpChecklistItem[] | null = useMemo(() => {
-    if (!character.pendingLevelUp || !character.levelUpChecklist) return null;
-    try {
-      return JSON.parse(character.levelUpChecklist);
-    } catch {
-      return null;
-    }
-  }, [character.pendingLevelUp, character.levelUpChecklist]);
-
-  const refresh = useCallback(async () => {
-    const res = await fetch("/api/character");
-    if (res.ok) {
-      const data = await res.json();
-      if (data.character) setCharacter(data.character);
-    }
-    router.refresh();
-  }, [router]);
-
-  function set<K extends keyof FullCharacter>(key: K, value: FullCharacter[K]) {
-    setCharacter((c) => ({ ...c, [key]: value }));
+  function set<K extends keyof EditableFields>(key: K, value: EditableFields[K]) {
+    setDraft((d) => ({ ...d, [key]: value }));
   }
 
   async function save() {
     setSaving(true);
     setError(null);
-    const res = await fetch("/api/character", {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        name: character.name,
-        race: character.race,
-        class: character.class,
-        background: character.background,
-        bio: character.bio,
-        avatarUrl: character.avatarUrl,
-        currentHP: character.currentHP,
-        maxHP: character.maxHP,
-        tempHP: character.tempHP,
-        armorClass: character.armorClass,
-        speed: character.speed,
-        strength: character.strength,
-        dexterity: character.dexterity,
-        constitution: character.constitution,
-        intelligence: character.intelligence,
-        wisdom: character.wisdom,
-        charisma: character.charisma,
-        gold: character.gold,
-        isGoldPublic: character.isGoldPublic,
-      }),
-    });
-    setSaving(false);
-    if (!res.ok) {
-      const data = await res.json().catch(() => ({}));
-      setError(data.error ?? "Failed to save.");
-      return;
+    try {
+      const currentHP = Math.max(0, Math.min(draft.currentHP, draft.maxHP));
+      await updateDoc(doc(db, "characters", character.id), {
+        ...draft,
+        currentHP,
+        updatedAt: serverTimestamp(),
+      });
+      setSavedAt(Date.now());
+    } catch {
+      setError("Failed to save.");
+    } finally {
+      setSaving(false);
     }
-    const data = await res.json();
-    setCharacter(data.character);
-    setSavedAt(Date.now());
-    router.refresh();
   }
 
   return (
     <div className="space-y-6">
-      {checklist && (
-        <LevelUpChecklist level={character.level} checklist={checklist} onChange={refresh} />
+      {character.pendingLevelUp && character.levelUpChecklist && (
+        <LevelUpChecklist
+          characterId={character.id}
+          level={character.level}
+          checklist={character.levelUpChecklist}
+        />
       )}
 
       <div className="card p-5">
         <div className="mb-4 flex items-center justify-between">
           <h2 className="font-display text-xl font-bold text-gold">
-            {character.name || "Unnamed Adventurer"}
+            {draft.name || "Unnamed Adventurer"}
           </h2>
           <span className="text-sm text-parchment/70">Level {character.level}</span>
         </div>
@@ -136,30 +130,30 @@ export default function CharacterSheetForm({ initialCharacter }: { initialCharac
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <div>
             <label className="label">Name</label>
-            <input className="input" value={character.name} onChange={(e) => set("name", e.target.value)} />
+            <input className="input" value={draft.name} onChange={(e) => set("name", e.target.value)} />
           </div>
           <div>
             <label className="label">Avatar URL (optional)</label>
             <input
               className="input"
-              value={character.avatarUrl ?? ""}
+              value={draft.avatarUrl ?? ""}
               onChange={(e) => set("avatarUrl", e.target.value)}
               placeholder="https://..."
             />
           </div>
           <div>
             <label className="label">Race</label>
-            <input className="input" value={character.race} onChange={(e) => set("race", e.target.value)} />
+            <input className="input" value={draft.race} onChange={(e) => set("race", e.target.value)} />
           </div>
           <div>
             <label className="label">Class</label>
-            <input className="input" value={character.class} onChange={(e) => set("class", e.target.value)} />
+            <input className="input" value={draft.class} onChange={(e) => set("class", e.target.value)} />
           </div>
           <div>
             <label className="label">Background</label>
             <input
               className="input"
-              value={character.background ?? ""}
+              value={draft.background ?? ""}
               onChange={(e) => set("background", e.target.value)}
             />
           </div>
@@ -169,7 +163,7 @@ export default function CharacterSheetForm({ initialCharacter }: { initialCharac
           <label className="label">Bio</label>
           <textarea
             className="input min-h-[100px]"
-            value={character.bio ?? ""}
+            value={draft.bio ?? ""}
             onChange={(e) => set("bio", e.target.value)}
             placeholder="Backstory, personality, notable quirks..."
           />
@@ -179,7 +173,7 @@ export default function CharacterSheetForm({ initialCharacter }: { initialCharac
       <div className="card p-5">
         <h2 className="mb-4 font-display text-xl font-bold text-gold">Combat Stats</h2>
         <div className="mb-4">
-          <HPBar current={character.currentHP} max={character.maxHP} />
+          <HPBar current={draft.currentHP} max={draft.maxHP} />
         </div>
         <div className="grid grid-cols-2 gap-4 sm:grid-cols-5">
           <div>
@@ -187,7 +181,7 @@ export default function CharacterSheetForm({ initialCharacter }: { initialCharac
             <input
               type="number"
               className="input"
-              value={character.currentHP}
+              value={draft.currentHP}
               onChange={(e) => set("currentHP", Number(e.target.value))}
             />
           </div>
@@ -196,7 +190,7 @@ export default function CharacterSheetForm({ initialCharacter }: { initialCharac
             <input
               type="number"
               className="input"
-              value={character.maxHP}
+              value={draft.maxHP}
               onChange={(e) => set("maxHP", Number(e.target.value))}
             />
           </div>
@@ -205,7 +199,7 @@ export default function CharacterSheetForm({ initialCharacter }: { initialCharac
             <input
               type="number"
               className="input"
-              value={character.tempHP}
+              value={draft.tempHP}
               onChange={(e) => set("tempHP", Number(e.target.value))}
             />
           </div>
@@ -214,7 +208,7 @@ export default function CharacterSheetForm({ initialCharacter }: { initialCharac
             <input
               type="number"
               className="input"
-              value={character.armorClass}
+              value={draft.armorClass}
               onChange={(e) => set("armorClass", Number(e.target.value))}
             />
           </div>
@@ -223,7 +217,7 @@ export default function CharacterSheetForm({ initialCharacter }: { initialCharac
             <input
               type="number"
               className="input"
-              value={character.speed}
+              value={draft.speed}
               onChange={(e) => set("speed", Number(e.target.value))}
             />
           </div>
@@ -234,7 +228,7 @@ export default function CharacterSheetForm({ initialCharacter }: { initialCharac
         <h2 className="mb-4 font-display text-xl font-bold text-gold">Ability Scores</h2>
         <div className="grid grid-cols-3 gap-4 sm:grid-cols-6">
           {ABILITY_SCORES.map(({ key, label }) => {
-            const value = character[key] as number;
+            const value = draft[key] as number;
             return (
               <div key={key} className="text-center">
                 <label className="label">{label}</label>
@@ -259,14 +253,14 @@ export default function CharacterSheetForm({ initialCharacter }: { initialCharac
             <input
               type="number"
               className="input w-32"
-              value={character.gold}
+              value={draft.gold}
               onChange={(e) => set("gold", Number(e.target.value))}
             />
           </div>
           <label className="flex items-center gap-2 pb-2 text-sm text-parchment/80">
             <input
               type="checkbox"
-              checked={character.isGoldPublic}
+              checked={draft.isGoldPublic}
               onChange={(e) => set("isGoldPublic", e.target.checked)}
               className="h-4 w-4 accent-ember"
             />
@@ -283,7 +277,7 @@ export default function CharacterSheetForm({ initialCharacter }: { initialCharac
         {error && <span className="text-sm text-ember">{error}</span>}
       </div>
 
-      <GearList gear={character.gear} onChange={refresh} />
+      <GearList characterId={character.id} gear={gear} />
     </div>
   );
 }

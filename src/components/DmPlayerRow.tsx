@@ -1,64 +1,54 @@
 "use client";
 
-import { useRouter } from "next/navigation";
 import { useState } from "react";
+import { doc, serverTimestamp, updateDoc } from "firebase/firestore";
+import { db } from "@/lib/firebase";
+import { buildChecklist } from "@/lib/levelUpSteps";
+import type { CharacterDoc } from "@/lib/types";
 
 export type DmPlayer = {
   userId: string;
   username: string;
   isScribe: boolean;
-  character: {
-    id: string;
-    name: string;
-    race: string;
-    class: string;
-    level: number;
-    currentHP: number;
-    maxHP: number;
-    gold: number;
-    isGoldPublic: boolean;
-    pendingLevelUp: boolean;
-  } | null;
+  character: CharacterDoc | null;
 };
 
 export default function DmPlayerRow({ player }: { player: DmPlayer }) {
-  const router = useRouter();
   const [level, setLevel] = useState(player.character?.level ?? 1);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   async function applyLevel() {
-    if (!player.character) return;
+    const character = player.character;
+    if (!character) return;
     setBusy(true);
     setError(null);
-    const res = await fetch("/api/dm/level", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ characterId: player.character.id, level }),
-    });
-    setBusy(false);
-    if (!res.ok) {
-      const data = await res.json().catch(() => ({}));
-      setError(data.error ?? "Failed to update level.");
-      return;
+    try {
+      const leveledUp = level > character.level;
+      await updateDoc(doc(db, "characters", character.id), {
+        level,
+        proficiencyBonus: Math.floor((level - 1) / 4) + 2,
+        pendingLevelUp: leveledUp ? true : character.pendingLevelUp,
+        levelUpChecklist: leveledUp ? buildChecklist() : character.levelUpChecklist,
+        updatedAt: serverTimestamp(),
+      });
+    } catch {
+      setError("Failed to update level.");
+    } finally {
+      setBusy(false);
     }
-    router.refresh();
   }
 
   async function toggleScribe() {
     setBusy(true);
     setError(null);
-    const res = await fetch("/api/dm/scribe", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ userId: player.userId, isScribe: !player.isScribe }),
-    });
-    setBusy(false);
-    if (!res.ok) {
+    try {
+      await updateDoc(doc(db, "users", player.userId), { isScribe: !player.isScribe });
+    } catch {
       setError("Failed to update scribe status.");
-      return;
+    } finally {
+      setBusy(false);
     }
-    router.refresh();
   }
 
   return (

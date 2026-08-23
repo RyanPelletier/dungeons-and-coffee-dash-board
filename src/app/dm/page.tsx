@@ -1,41 +1,56 @@
-import { getServerSession } from "next-auth";
-import { redirect } from "next/navigation";
-import { authOptions } from "@/lib/auth";
-import { prisma } from "@/lib/prisma";
+"use client";
+
+import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
+import { collection, onSnapshot, orderBy, query } from "firebase/firestore";
+import { db } from "@/lib/firebase";
+import { useAuth } from "@/components/AuthProvider";
 import DmPlayerRow, { DmPlayer } from "@/components/DmPlayerRow";
+import type { CharacterDoc, UserProfile } from "@/lib/types";
 
-export const dynamic = "force-dynamic";
+export default function DmDashboardPage() {
+  const { profile, loading } = useAuth();
+  const router = useRouter();
+  const [users, setUsers] = useState<UserProfile[]>([]);
+  const [characters, setCharacters] = useState<CharacterDoc[]>([]);
+  const [dataLoading, setDataLoading] = useState(true);
 
-export default async function DmDashboardPage() {
-  const session = await getServerSession(authOptions);
-  if (!session) redirect("/login");
-  if (session.user.role !== "DM") redirect("/");
+  const isDm = Boolean(profile && profile.role === "DM");
 
-  const users = await prisma.user.findMany({
-    where: { role: "PLAYER" },
-    include: { character: true },
-    orderBy: { username: "asc" },
-  });
+  useEffect(() => {
+    if (loading) return;
+    if (!profile) router.push("/login");
+    else if (profile.role !== "DM") router.push("/");
+  }, [loading, profile, router]);
 
-  const players: DmPlayer[] = users.map((u) => ({
-    userId: u.id,
-    username: u.username,
-    isScribe: u.isScribe,
-    character: u.character
-      ? {
-          id: u.character.id,
-          name: u.character.name,
-          race: u.character.race,
-          class: u.character.class,
-          level: u.character.level,
-          currentHP: u.character.currentHP,
-          maxHP: u.character.maxHP,
-          gold: u.character.gold,
-          isGoldPublic: u.character.isGoldPublic,
-          pendingLevelUp: u.character.pendingLevelUp,
-        }
-      : null,
-  }));
+  useEffect(() => {
+    if (!isDm) return;
+    const unsubUsers = onSnapshot(collection(db, "users"), (snap) => {
+      setUsers(snap.docs.map((d) => d.data() as UserProfile));
+    });
+    const unsubChars = onSnapshot(query(collection(db, "characters"), orderBy("name", "asc")), (snap) => {
+      setCharacters(snap.docs.map((d) => d.data() as CharacterDoc));
+      setDataLoading(false);
+    });
+    return () => {
+      unsubUsers();
+      unsubChars();
+    };
+  }, [isDm]);
+
+  if (loading || !isDm) {
+    return <p className="text-parchment/60">Loading...</p>;
+  }
+
+  const players: DmPlayer[] = users
+    .filter((u) => u.role === "PLAYER")
+    .map((u) => ({
+      userId: u.uid,
+      username: u.username,
+      isScribe: u.isScribe,
+      character: characters.find((c) => c.userId === u.uid) ?? null,
+    }))
+    .sort((a, b) => a.username.localeCompare(b.username));
 
   return (
     <div>
@@ -61,9 +76,11 @@ export default async function DmDashboardPage() {
             ))}
           </tbody>
         </table>
-        {players.length === 0 && (
+        {dataLoading ? (
+          <p className="py-4 text-center text-parchment/50">Loading players...</p>
+        ) : players.length === 0 ? (
           <p className="py-4 text-center text-parchment/50">No players have joined yet.</p>
-        )}
+        ) : null}
       </div>
     </div>
   );

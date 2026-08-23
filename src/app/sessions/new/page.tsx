@@ -2,11 +2,13 @@
 
 import { FormEvent, useState } from "react";
 import { useRouter } from "next/navigation";
-import { useSession } from "next-auth/react";
+import { addDoc, collection, serverTimestamp } from "firebase/firestore";
+import { db } from "@/lib/firebase";
+import { useAuth } from "@/components/AuthProvider";
 import ImageUploader from "@/components/ImageUploader";
 
 export default function NewSessionPostPage() {
-  const { data: session, status } = useSession();
+  const { firebaseUser, profile, loading } = useAuth();
   const router = useRouter();
   const [title, setTitle] = useState("");
   const [sessionNumber, setSessionNumber] = useState("");
@@ -15,9 +17,9 @@ export default function NewSessionPostPage() {
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
-  if (status === "loading") return null;
+  if (loading) return null;
 
-  const canPost = Boolean(session && (session.user.role === "DM" || session.user.isScribe));
+  const canPost = Boolean(profile && (profile.role === "DM" || profile.isScribe));
   if (!canPost) {
     return (
       <div className="card mx-auto max-w-lg p-6 text-center">
@@ -31,26 +33,26 @@ export default function NewSessionPostPage() {
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
+    if (!firebaseUser || !profile) return;
     setSubmitting(true);
     setError(null);
-    const res = await fetch("/api/sessions", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        title,
-        sessionNumber: sessionNumber || null,
-        content,
+    try {
+      const docRef = await addDoc(collection(db, "sessionPosts"), {
+        title: title.trim(),
+        sessionNumber: sessionNumber ? Number(sessionNumber) : null,
+        content: content.trim(),
+        authorId: firebaseUser.uid,
+        authorName: profile.username,
         imageUrls: images,
-      }),
-    });
-    setSubmitting(false);
-    if (!res.ok) {
-      const data = await res.json().catch(() => ({}));
-      setError(data.error ?? "Failed to post.");
-      return;
+        commentCount: 0,
+        createdAt: serverTimestamp(),
+      });
+      router.push(`/sessions/post?id=${docRef.id}`);
+    } catch {
+      setError("Failed to post.");
+    } finally {
+      setSubmitting(false);
     }
-    const data = await res.json();
-    router.push(`/sessions/${data.post.id}`);
   }
 
   return (

@@ -1,31 +1,21 @@
-import { prisma } from "@/lib/prisma";
-import CharacterCard, { DashboardCharacter } from "@/components/CharacterCard";
+"use client";
 
-export const dynamic = "force-dynamic";
+import { useEffect, useState } from "react";
+import { collection, onSnapshot, orderBy, query } from "firebase/firestore";
+import { db } from "@/lib/firebase";
+import CharacterCard from "@/components/CharacterCard";
+import type { CharacterDoc } from "@/lib/types";
 
-export default async function CampaignDashboard() {
-  const characters = await prisma.character.findMany({
-    include: { user: { select: { username: true } } },
-    orderBy: { name: "asc" },
-  });
+export default function CampaignDashboard() {
+  const [characters, setCharacters] = useState<CharacterDoc[] | null>(null);
 
-  const cards: DashboardCharacter[] = characters.map((c) => ({
-    id: c.id,
-    name: c.name,
-    race: c.race,
-    class: c.class,
-    background: c.background,
-    bio: c.bio,
-    level: c.level,
-    currentHP: c.currentHP,
-    maxHP: c.maxHP,
-    armorClass: c.armorClass,
-    gold: c.gold,
-    isGoldPublic: c.isGoldPublic,
-    avatarUrl: c.avatarUrl,
-    pendingLevelUp: c.pendingLevelUp,
-    playerName: c.user.username,
-  }));
+  useEffect(() => {
+    const q = query(collection(db, "characters"), orderBy("name", "asc"));
+    const unsub = onSnapshot(q, (snap) => {
+      setCharacters(snap.docs.map((d) => d.data() as CharacterDoc));
+    });
+    return unsub;
+  }, []);
 
   return (
     <div>
@@ -36,11 +26,13 @@ export default async function CampaignDashboard() {
         </p>
       </div>
 
-      {cards.length === 0 ? (
+      {characters === null ? (
+        <p className="text-parchment/60">Loading the party...</p>
+      ) : characters.length === 0 ? (
         <p className="text-parchment/60">No adventurers have joined the party yet.</p>
       ) : (
         <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3">
-          {cards.map((c) => (
+          {characters.map((c) => (
             <CharacterCard key={c.id} character={c} />
           ))}
         </div>

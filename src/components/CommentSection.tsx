@@ -1,27 +1,20 @@
 "use client";
 
 import { FormEvent, useState } from "react";
-import { useRouter } from "next/navigation";
-import { useSession } from "next-auth/react";
+import { collection, doc, increment, serverTimestamp, writeBatch } from "firebase/firestore";
+import { db } from "@/lib/firebase";
+import { useAuth } from "./AuthProvider";
 import ImageUploader from "./ImageUploader";
-
-export type CommentData = {
-  id: string;
-  content: string;
-  createdAt: string;
-  author: { username: string };
-  images: { id: string; url: string }[];
-};
+import type { CommentDoc } from "@/lib/types";
 
 export default function CommentSection({
   postId,
   comments,
 }: {
   postId: string;
-  comments: CommentData[];
+  comments: CommentDoc[];
 }) {
-  const { data: session } = useSession();
-  const router = useRouter();
+  const { firebaseUser, profile } = useAuth();
   const [content, setContent] = useState("");
   const [images, setImages] = useState<string[]>([]);
   const [submitting, setSubmitting] = useState(false);
@@ -29,23 +22,29 @@ export default function CommentSection({
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
-    if (!content.trim()) return;
+    if (!content.trim() || !firebaseUser || !profile) return;
     setSubmitting(true);
     setError(null);
-    const res = await fetch(`/api/sessions/${postId}/comments`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ content, imageUrls: images }),
-    });
-    setSubmitting(false);
-    if (!res.ok) {
-      const data = await res.json().catch(() => ({}));
-      setError(data.error ?? "Failed to post comment.");
-      return;
+    try {
+      const batch = writeBatch(db);
+      const commentRef = doc(collection(db, "sessionPosts", postId, "comments"));
+      batch.set(commentRef, {
+        postId,
+        authorId: firebaseUser.uid,
+        authorName: profile.username,
+        content: content.trim(),
+        imageUrls: images,
+        createdAt: serverTimestamp(),
+      });
+      batch.update(doc(db, "sessionPosts", postId), { commentCount: increment(1) });
+      await batch.commit();
+      setContent("");
+      setImages([]);
+    } catch {
+      setError("Failed to post comment.");
+    } finally {
+      setSubmitting(false);
     }
-    setContent("");
-    setImages([]);
-    router.refresh();
   }
 
   return (
@@ -58,17 +57,17 @@ export default function CommentSection({
         {comments.map((c) => (
           <div key={c.id} className="card p-4">
             <div className="mb-1 flex items-center justify-between">
-              <span className="font-semibold text-parchment">{c.author.username}</span>
+              <span className="font-semibold text-parchment">{c.authorName}</span>
               <span className="text-xs text-parchment/50">
                 {new Date(c.createdAt).toLocaleString()}
               </span>
             </div>
             <p className="whitespace-pre-wrap text-sm text-parchment/80">{c.content}</p>
-            {c.images.length > 0 && (
+            {c.imageUrls.length > 0 && (
               <div className="mt-2 flex flex-wrap gap-2">
-                {c.images.map((img) => (
+                {c.imageUrls.map((url) => (
                   // eslint-disable-next-line @next/next/no-img-element
-                  <img key={img.id} src={img.url} alt="" className="h-24 w-24 rounded object-cover" />
+                  <img key={url} src={url} alt="" className="h-24 w-24 rounded object-cover" />
                 ))}
               </div>
             )}
@@ -77,7 +76,7 @@ export default function CommentSection({
         {comments.length === 0 && <p className="text-sm text-parchment/50">No comments yet.</p>}
       </div>
 
-      {session ? (
+      {firebaseUser && profile ? (
         <form onSubmit={handleSubmit} className="card mt-4 p-4">
           <label className="label">Add a comment</label>
           <textarea

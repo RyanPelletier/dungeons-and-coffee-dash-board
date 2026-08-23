@@ -1,12 +1,23 @@
 "use client";
 
 import { FormEvent, useState } from "react";
-import { signIn } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
+import { useAuth } from "@/components/AuthProvider";
+import { FirebaseError } from "firebase/app";
+
+function friendlyError(err: unknown): string {
+  if (err instanceof FirebaseError) {
+    if (err.code === "auth/email-already-in-use") return "An account with that email already exists.";
+    if (err.code === "auth/weak-password") return "Password must be at least 8 characters.";
+    if (err.code === "auth/invalid-email") return "That email address looks invalid.";
+  }
+  return "Something went wrong. Please try again.";
+}
 
 export default function RegisterPage() {
   const router = useRouter();
+  const { signUp } = useAuth();
   const [form, setForm] = useState({
     email: "",
     username: "",
@@ -27,33 +38,14 @@ export default function RegisterPage() {
     e.preventDefault();
     setError(null);
     setLoading(true);
-
-    const res = await fetch("/api/register", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(form),
-    });
-
-    if (!res.ok) {
-      const data = await res.json().catch(() => ({}));
-      setError(data.error ?? "Something went wrong.");
+    try {
+      await signUp(form);
+      router.push("/dashboard");
+    } catch (err) {
+      setError(friendlyError(err));
+    } finally {
       setLoading(false);
-      return;
     }
-
-    const signInRes = await signIn("credentials", {
-      email: form.email,
-      password: form.password,
-      redirect: false,
-    });
-    setLoading(false);
-
-    if (signInRes?.error) {
-      router.push("/login");
-      return;
-    }
-    router.push("/dashboard");
-    router.refresh();
   }
 
   return (

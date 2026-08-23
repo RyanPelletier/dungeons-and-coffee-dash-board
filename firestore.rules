@@ -1,0 +1,115 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function myProfile() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+
+    function isDM() {
+      return isSignedIn() && myProfile().role == 'DM';
+    }
+
+    function isScribeOrDM() {
+      return isSignedIn() && (myProfile().isScribe == true || myProfile().role == 'DM');
+    }
+
+    // --- users ---------------------------------------------------------
+    // Profiles hold an email address, so only the owner and the DM may
+    // read them. Everything else (character name, HP, etc.) that needs to
+    // be public lives on the character doc instead.
+    match /users/{uid} {
+      allow read: if isSignedIn() && (request.auth.uid == uid || isDM());
+
+      allow create: if isSignedIn() && request.auth.uid == uid
+        && request.resource.data.uid == uid
+        && request.resource.data.role == 'PLAYER'
+        && request.resource.data.isScribe == false;
+
+      // Only the DM can flip isScribe, and only that field.
+      allow update: if isDM()
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['isScribe']);
+
+      allow delete: if false;
+    }
+
+    // --- characters ------------------------------------------------------
+    // Public read (the campaign dashboard has no login wall). Note: since
+    // Firestore can't hide individual fields from a document read, the
+    // "hide my gold" toggle only hides it in the UI, not from someone
+    // reading the raw document — fine for a private friend-group app, but
+    // don't treat it as a hard security boundary.
+    match /characters/{charId} {
+      allow read: if true;
+
+      allow create: if isSignedIn() && request.auth.uid == charId
+        && request.resource.data.id == charId
+        && request.resource.data.userId == charId
+        && request.resource.data.level == 1
+        && request.resource.data.pendingLevelUp == false;
+
+      allow update: if isSignedIn() && (
+        (request.auth.uid == charId && ownerUpdateIsAllowed()) ||
+        (isDM() && dmUpdateIsAllowed())
+      );
+
+      allow delete: if false;
+
+      function ownerUpdateIsAllowed() {
+        let changed = request.resource.data.diff(resource.data).affectedKeys();
+        let ownerKeys = [
+          'name', 'race', 'class', 'background', 'bio', 'avatarUrl',
+          'currentHP', 'maxHP', 'tempHP', 'armorClass', 'speed',
+          'strength', 'dexterity', 'constitution', 'intelligence', 'wisdom', 'charisma',
+          'gold', 'isGoldPublic', 'levelUpChecklist', 'pendingLevelUp', 'updatedAt'
+        ];
+        return changed.hasOnly(ownerKeys)
+          // level & proficiencyBonus are DM-only fields.
+          && request.resource.data.level == resource.data.level
+          && request.resource.data.proficiencyBonus == resource.data.proficiencyBonus
+          // a player may only turn pendingLevelUp OFF (finishing the
+          // checklist), never on — only the DM starts a level-up.
+          && (request.resource.data.pendingLevelUp == resource.data.pendingLevelUp
+              || (resource.data.pendingLevelUp == true && request.resource.data.pendingLevelUp == false));
+      }
+
+      function dmUpdateIsAllowed() {
+        let changed = request.resource.data.diff(resource.data).affectedKeys();
+        return changed.hasOnly(['level', 'proficiencyBonus', 'pendingLevelUp', 'levelUpChecklist', 'updatedAt']);
+      }
+
+      match /gear/{gearId} {
+        allow read: if true;
+        allow write: if isSignedIn() && request.auth.uid == charId;
+      }
+    }
+
+    // --- session log -----------------------------------------------------
+    match /sessionPosts/{postId} {
+      allow read: if true;
+
+      allow create: if isSignedIn() && isScribeOrDM()
+        && request.resource.data.authorId == request.auth.uid
+        && request.resource.data.commentCount == 0;
+
+      // The only allowed update from a client is bumping commentCount by
+      // exactly one when a comment is added.
+      allow update: if isSignedIn()
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['commentCount'])
+        && request.resource.data.commentCount == resource.data.commentCount + 1;
+
+      allow delete: if false;
+
+      match /comments/{commentId} {
+        allow read: if true;
+        allow create: if isSignedIn() && request.resource.data.authorId == request.auth.uid;
+        allow update, delete: if false;
+      }
+    }
+  }
+}

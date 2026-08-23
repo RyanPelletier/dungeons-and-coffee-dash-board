@@ -1,8 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
-import { signOut, useSession } from "next-auth/react";
+import { usePathname, useRouter } from "next/navigation";
+import { useAuth } from "./AuthProvider";
 
 const links = [
   { href: "/", label: "Campaign" },
@@ -12,8 +12,14 @@ const links = [
 ];
 
 export default function NavBar() {
-  const { data: session } = useSession();
+  const { profile, signOutUser } = useAuth();
   const pathname = usePathname();
+  const router = useRouter();
+
+  async function handleSignOut() {
+    await signOutUser();
+    router.push("/");
+  }
 
   return (
     <header className="border-b border-gold/20 bg-night/90 backdrop-blur">
@@ -23,8 +29,8 @@ export default function NavBar() {
         </Link>
         <nav className="flex flex-wrap items-center gap-1">
           {links.map((link) => {
-            if (link.requiresAuth && !session) return null;
-            if (link.requiresDm && session?.user.role !== "DM") return null;
+            if (link.requiresAuth && !profile) return null;
+            if (link.requiresDm && profile?.role !== "DM") return null;
             const active = pathname === link.href;
             return (
               <Link
@@ -42,20 +48,20 @@ export default function NavBar() {
           })}
         </nav>
         <div className="flex items-center gap-2">
-          {session ? (
+          {profile ? (
             <>
               <span className="text-sm text-parchment/70">
-                {session.user.name}
-                {session.user.role === "DM" && (
+                {profile.username}
+                {profile.role === "DM" && (
                   <span className="ml-1 rounded bg-gold/20 px-1.5 py-0.5 text-xs text-gold">DM</span>
                 )}
-                {session.user.isScribe && (
+                {profile.isScribe && (
                   <span className="ml-1 rounded bg-moss/40 px-1.5 py-0.5 text-xs text-parchment">
                     Scribe
                   </span>
                 )}
               </span>
-              <button onClick={() => signOut({ callbackUrl: "/" })} className="btn-secondary !px-3 !py-1 text-sm">
+              <button onClick={handleSignOut} className="btn-secondary !px-3 !py-1 text-sm">
                 Sign out
               </button>
             </>

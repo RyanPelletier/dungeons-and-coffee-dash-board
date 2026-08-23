@@ -1,16 +1,18 @@
 "use client";
 
 import { useState } from "react";
+import { doc, serverTimestamp, updateDoc } from "firebase/firestore";
+import { db } from "@/lib/firebase";
 import type { LevelUpChecklistItem } from "@/lib/levelUpSteps";
 
 export default function LevelUpChecklist({
+  characterId,
   level,
   checklist,
-  onChange,
 }: {
+  characterId: string;
   level: number;
   checklist: LevelUpChecklistItem[];
-  onChange: () => void;
 }) {
   const [busyIndex, setBusyIndex] = useState<number | null>(null);
   const [finishing, setFinishing] = useState(false);
@@ -22,26 +24,33 @@ export default function LevelUpChecklist({
   async function toggle(index: number) {
     setBusyIndex(index);
     setError(null);
-    await fetch("/api/character/levelup", {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ index }),
-    });
-    setBusyIndex(null);
-    onChange();
+    const updated = checklist.map((item, i) => (i === index ? { ...item, done: !item.done } : item));
+    try {
+      await updateDoc(doc(db, "characters", characterId), {
+        levelUpChecklist: updated,
+        updatedAt: serverTimestamp(),
+      });
+    } catch {
+      setError("Could not update the checklist.");
+    } finally {
+      setBusyIndex(null);
+    }
   }
 
   async function finish() {
     setFinishing(true);
     setError(null);
-    const res = await fetch("/api/character/levelup", { method: "POST" });
-    setFinishing(false);
-    if (!res.ok) {
-      const data = await res.json().catch(() => ({}));
-      setError(data.error ?? "Could not confirm level up.");
-      return;
+    try {
+      await updateDoc(doc(db, "characters", characterId), {
+        pendingLevelUp: false,
+        levelUpChecklist: null,
+        updatedAt: serverTimestamp(),
+      });
+    } catch {
+      setError("Could not confirm level up.");
+    } finally {
+      setFinishing(false);
     }
-    onChange();
   }
 
   return (
@@ -74,11 +83,7 @@ export default function LevelUpChecklist({
         ))}
       </ul>
       {error && <p className="mt-3 text-sm text-ember">{error}</p>}
-      <button
-        onClick={finish}
-        disabled={!allDone || finishing}
-        className="btn-primary mt-4"
-      >
+      <button onClick={finish} disabled={!allDone || finishing} className="btn-primary mt-4">
         {finishing ? "Confirming..." : "Confirm Level Up"}
       </button>
     </div>

@@ -1,22 +1,11 @@
 "use client";
 
 import { useState } from "react";
+import { addDoc, collection, deleteDoc, doc, serverTimestamp, updateDoc } from "firebase/firestore";
+import { db } from "@/lib/firebase";
+import type { GearItem } from "@/lib/types";
 
-export type GearItem = {
-  id: string;
-  name: string;
-  quantity: number;
-  description: string | null;
-  equipped: boolean;
-};
-
-export default function GearList({
-  gear,
-  onChange,
-}: {
-  gear: GearItem[];
-  onChange: () => void;
-}) {
+export default function GearList({ characterId, gear }: { characterId: string; gear: GearItem[] }) {
   const [name, setName] = useState("");
   const [quantity, setQuantity] = useState(1);
   const [adding, setAdding] = useState(false);
@@ -25,29 +14,29 @@ export default function GearList({
     e.preventDefault();
     if (!name.trim()) return;
     setAdding(true);
-    await fetch("/api/character/gear", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name, quantity }),
-    });
-    setAdding(false);
-    setName("");
-    setQuantity(1);
-    onChange();
+    try {
+      await addDoc(collection(db, "characters", characterId, "gear"), {
+        name: name.trim(),
+        quantity,
+        description: null,
+        equipped: false,
+        createdAt: serverTimestamp(),
+      });
+      setName("");
+      setQuantity(1);
+    } finally {
+      setAdding(false);
+    }
   }
 
   async function toggleEquipped(item: GearItem) {
-    await fetch(`/api/character/gear/${item.id}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ equipped: !item.equipped }),
+    await updateDoc(doc(db, "characters", characterId, "gear", item.id), {
+      equipped: !item.equipped,
     });
-    onChange();
   }
 
   async function removeItem(item: GearItem) {
-    await fetch(`/api/character/gear/${item.id}`, { method: "DELETE" });
-    onChange();
+    await deleteDoc(doc(db, "characters", characterId, "gear", item.id));
   }
 
   return (

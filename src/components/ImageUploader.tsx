@@ -1,6 +1,11 @@
 "use client";
 
 import { useRef, useState } from "react";
+import { getDownloadURL, ref, uploadBytes } from "firebase/storage";
+import { storage } from "@/lib/firebase";
+
+const ALLOWED_TYPES = ["image/png", "image/jpeg", "image/gif", "image/webp"];
+const MAX_BYTES = 8 * 1024 * 1024; // 8MB
 
 export default function ImageUploader({
   urls,
@@ -19,16 +24,23 @@ export default function ImageUploader({
     setError(null);
     const newUrls: string[] = [];
     for (const file of Array.from(files)) {
-      const formData = new FormData();
-      formData.append("file", file);
-      const res = await fetch("/api/upload", { method: "POST", body: formData });
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
-        setError(data.error ?? "Upload failed");
+      if (!ALLOWED_TYPES.includes(file.type)) {
+        setError("Only PNG, JPEG, GIF, or WebP images are allowed");
         continue;
       }
-      const data = await res.json();
-      newUrls.push(data.url);
+      if (file.size > MAX_BYTES) {
+        setError("Image must be smaller than 8MB");
+        continue;
+      }
+      try {
+        const path = `sessionImages/${crypto.randomUUID()}-${file.name}`;
+        const fileRef = ref(storage, path);
+        await uploadBytes(fileRef, file, { contentType: file.type });
+        const url = await getDownloadURL(fileRef);
+        newUrls.push(url);
+      } catch {
+        setError("Upload failed");
+      }
     }
     onChange([...urls, ...newUrls]);
     setUploading(false);
