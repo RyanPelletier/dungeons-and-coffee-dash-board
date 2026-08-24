@@ -1,12 +1,13 @@
 "use client";
 
 import { useState } from "react";
-import { doc, serverTimestamp, updateDoc } from "firebase/firestore";
+import { doc, serverTimestamp, setDoc } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import HPBar from "./HPBar";
 import GearList from "./GearList";
 import LevelUpChecklist from "./LevelUpChecklist";
-import type { CharacterDoc, GearItem } from "@/lib/types";
+import { DEFAULT_SAVING_THROW_PROFICIENCIES } from "@/lib/types";
+import type { AbilityKey, CharacterDoc, GearItem, SavingThrowProficiencies } from "@/lib/types";
 
 type EditableFields = Pick<
   CharacterDoc,
@@ -16,44 +17,28 @@ type EditableFields = Pick<
   | "background"
   | "bio"
   | "avatarUrl"
+  | "alignment"
+  | "xp"
+  | "inspiration"
   | "currentHP"
   | "maxHP"
   | "tempHP"
   | "armorClass"
   | "speed"
+  | "hitDiceType"
+  | "hitDiceRemaining"
   | "strength"
   | "dexterity"
   | "constitution"
   | "intelligence"
   | "wisdom"
   | "charisma"
+  | "savingThrowProficiencies"
   | "gold"
   | "isGoldPublic"
 >;
 
-const EDITABLE_KEYS: (keyof EditableFields)[] = [
-  "name",
-  "race",
-  "class",
-  "background",
-  "bio",
-  "avatarUrl",
-  "currentHP",
-  "maxHP",
-  "tempHP",
-  "armorClass",
-  "speed",
-  "strength",
-  "dexterity",
-  "constitution",
-  "intelligence",
-  "wisdom",
-  "charisma",
-  "gold",
-  "isGoldPublic",
-];
-
-const ABILITY_SCORES: { key: keyof EditableFields; label: string }[] = [
+const ABILITY_SCORES: { key: AbilityKey; label: string }[] = [
   { key: "strength", label: "STR" },
   { key: "dexterity", label: "DEX" },
   { key: "constitution", label: "CON" },
@@ -62,17 +47,47 @@ const ABILITY_SCORES: { key: keyof EditableFields; label: string }[] = [
   { key: "charisma", label: "CHA" },
 ];
 
-function modifier(score: number) {
-  const mod = Math.floor((score - 10) / 2);
+function modifierValue(score: number) {
+  return Math.floor((score - 10) / 2);
+}
+
+function formatModifier(mod: number) {
   return mod >= 0 ? `+${mod}` : `${mod}`;
 }
 
+// Character docs written before these fields existed won't have them —
+// fall back to sane defaults rather than crashing on undefined.
 function pickEditable(character: CharacterDoc): EditableFields {
-  const draft = {} as EditableFields;
-  for (const key of EDITABLE_KEYS) {
-    (draft as Record<string, unknown>)[key] = character[key];
-  }
-  return draft;
+  return {
+    name: character.name,
+    race: character.race,
+    class: character.class,
+    background: character.background,
+    bio: character.bio,
+    avatarUrl: character.avatarUrl,
+    alignment: character.alignment ?? null,
+    xp: character.xp ?? 0,
+    inspiration: character.inspiration ?? false,
+    currentHP: character.currentHP,
+    maxHP: character.maxHP,
+    tempHP: character.tempHP,
+    armorClass: character.armorClass,
+    speed: character.speed,
+    hitDiceType: character.hitDiceType ?? "d8",
+    hitDiceRemaining: character.hitDiceRemaining ?? character.level ?? 1,
+    strength: character.strength,
+    dexterity: character.dexterity,
+    constitution: character.constitution,
+    intelligence: character.intelligence,
+    wisdom: character.wisdom,
+    charisma: character.charisma,
+    savingThrowProficiencies: {
+      ...DEFAULT_SAVING_THROW_PROFICIENCIES,
+      ...character.savingThrowProficiencies,
+    },
+    gold: character.gold,
+    isGoldPublic: character.isGoldPublic,
+  };
 }
 
 export default function CharacterSheetForm({
@@ -91,16 +106,43 @@ export default function CharacterSheetForm({
     setDraft((d) => ({ ...d, [key]: value }));
   }
 
+  function toggleSave(ability: AbilityKey) {
+    setDraft((d) => ({
+      ...d,
+      savingThrowProficiencies: {
+        ...d.savingThrowProficiencies,
+        [ability]: !d.savingThrowProficiencies[ability],
+      } as SavingThrowProficiencies,
+    }));
+  }
+
   async function save() {
     setSaving(true);
     setError(null);
     try {
       const currentHP = Math.max(0, Math.min(draft.currentHP, draft.maxHP));
-      await updateDoc(doc(db, "characters", character.id), {
-        ...draft,
-        currentHP,
-        updatedAt: serverTimestamp(),
-      });
+      // Resend the non-editable identity/DM fields unchanged alongside the
+      // draft: harmless for a normal update (unchanged values never show up
+      // as "affected" in the rules diff), but it means this same call can
+      // also self-heal a character doc that never got created, since
+      // Firestore's create rule requires id/userId/level/pendingLevelUp to
+      // be present on the first write.
+      await setDoc(
+        doc(db, "characters", character.id),
+        {
+          id: character.id,
+          userId: character.userId,
+          ownerUsername: character.ownerUsername,
+          level: character.level,
+          proficiencyBonus: character.proficiencyBonus,
+          pendingLevelUp: character.pendingLevelUp,
+          levelUpChecklist: character.levelUpChecklist,
+          ...draft,
+          currentHP,
+          updatedAt: serverTimestamp(),
+        },
+        { merge: true }
+      );
       setSavedAt(Date.now());
     } catch {
       setError("Failed to save.");
@@ -108,6 +150,9 @@ export default function CharacterSheetForm({
       setSaving(false);
     }
   }
+
+  const dexMod = modifierValue(draft.dexterity);
+  const wisMod = modifierValue(draft.wisdom);
 
   return (
     <div className="space-y-6">
@@ -120,11 +165,15 @@ export default function CharacterSheetForm({
       )}
 
       <div className="card p-5">
-        <div className="mb-4 flex items-center justify-between">
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
           <h2 className="font-display text-xl font-bold text-gold">
             {draft.name || "Unnamed Adventurer"}
           </h2>
-          <span className="text-sm text-parchment/70">Level {character.level}</span>
+          <div className="flex items-center gap-3 text-sm text-parchment/70">
+            <span>Level {character.level}</span>
+            <span>·</span>
+            <span>{draft.hitDiceRemaining}/{character.level} Hit Dice ({draft.hitDiceType})</span>
+          </div>
         </div>
 
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
@@ -157,6 +206,33 @@ export default function CharacterSheetForm({
               onChange={(e) => set("background", e.target.value)}
             />
           </div>
+          <div>
+            <label className="label">Alignment</label>
+            <input
+              className="input"
+              value={draft.alignment ?? ""}
+              onChange={(e) => set("alignment", e.target.value)}
+              placeholder="Chaotic Good"
+            />
+          </div>
+          <div>
+            <label className="label">Experience Points</label>
+            <input
+              type="number"
+              className="input"
+              value={draft.xp}
+              onChange={(e) => set("xp", Number(e.target.value))}
+            />
+          </div>
+          <label className="flex items-center gap-2 pb-2 pt-6 text-sm text-parchment/80">
+            <input
+              type="checkbox"
+              checked={draft.inspiration}
+              onChange={(e) => set("inspiration", e.target.checked)}
+              className="h-4 w-4 accent-ember"
+            />
+            Inspiration
+          </label>
         </div>
 
         <div className="mt-4">
@@ -222,13 +298,42 @@ export default function CharacterSheetForm({
             />
           </div>
         </div>
+
+        <div className="mt-4 grid grid-cols-2 gap-4 sm:grid-cols-4">
+          <div>
+            <label className="label">Hit Dice Type</label>
+            <input
+              className="input"
+              value={draft.hitDiceType}
+              onChange={(e) => set("hitDiceType", e.target.value)}
+              placeholder="d8"
+            />
+          </div>
+          <div>
+            <label className="label">Hit Dice Remaining</label>
+            <input
+              type="number"
+              className="input"
+              value={draft.hitDiceRemaining}
+              onChange={(e) => set("hitDiceRemaining", Number(e.target.value))}
+            />
+          </div>
+          <div className="text-center">
+            <label className="label">Initiative</label>
+            <p className="input flex items-center justify-center !bg-night/60">{formatModifier(dexMod)}</p>
+          </div>
+          <div className="text-center">
+            <label className="label">Passive Perception</label>
+            <p className="input flex items-center justify-center !bg-night/60">{10 + wisMod}</p>
+          </div>
+        </div>
       </div>
 
       <div className="card p-5">
-        <h2 className="mb-4 font-display text-xl font-bold text-gold">Ability Scores</h2>
+        <h2 className="mb-4 font-display text-xl font-bold text-gold">Ability Scores &amp; Saving Throws</h2>
         <div className="grid grid-cols-3 gap-4 sm:grid-cols-6">
           {ABILITY_SCORES.map(({ key, label }) => {
-            const value = draft[key] as number;
+            const value = draft[key];
             return (
               <div key={key} className="text-center">
                 <label className="label">{label}</label>
@@ -238,8 +343,28 @@ export default function CharacterSheetForm({
                   value={value}
                   onChange={(e) => set(key, Number(e.target.value) as never)}
                 />
-                <p className="mt-1 text-xs text-parchment/50">{modifier(value)}</p>
+                <p className="mt-1 text-xs text-parchment/50">{formatModifier(modifierValue(value))}</p>
               </div>
+            );
+          })}
+        </div>
+
+        <div className="mt-5 grid grid-cols-2 gap-x-6 gap-y-2 sm:grid-cols-3">
+          {ABILITY_SCORES.map(({ key, label }) => {
+            const proficient = draft.savingThrowProficiencies[key];
+            const bonus = modifierValue(draft[key]) + (proficient ? character.proficiencyBonus : 0);
+            return (
+              <label key={key} className="flex items-center gap-2 text-sm text-parchment/80">
+                <input
+                  type="checkbox"
+                  checked={proficient}
+                  onChange={() => toggleSave(key)}
+                  className="h-4 w-4 accent-ember"
+                />
+                <span className="w-10 text-parchment/60">{label}</span>
+                <span className="font-medium text-parchment">{formatModifier(bonus)}</span>
+                <span className="text-xs text-parchment/50">save</span>
+              </label>
             );
           })}
         </div>

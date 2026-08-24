@@ -59,10 +59,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (!firebaseUser) return;
     setProfileLoading(true);
-    const unsub = onSnapshot(doc(db, "users", firebaseUser.uid), (snap) => {
-      setProfile(snap.exists() ? (snap.data() as UserProfile) : null);
-      setProfileLoading(false);
-    });
+    const unsub = onSnapshot(
+      doc(db, "users", firebaseUser.uid),
+      (snap) => {
+        setProfile(snap.exists() ? (snap.data() as UserProfile) : null);
+        setProfileLoading(false);
+      },
+      (error) => {
+        console.error("Failed to load user profile:", error);
+        setProfile(null);
+        setProfileLoading(false);
+      }
+    );
     return unsub;
   }, [firebaseUser]);
 

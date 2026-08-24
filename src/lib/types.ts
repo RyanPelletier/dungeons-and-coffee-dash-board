@@ -11,6 +11,16 @@ export type UserProfile = {
   createdAt: number;
 };
 
+export type AbilityKey =
+  | "strength"
+  | "dexterity"
+  | "constitution"
+  | "intelligence"
+  | "wisdom"
+  | "charisma";
+
+export type SavingThrowProficiencies = Record<AbilityKey, boolean>;
+
 export type CharacterDoc = {
   id: string; // Firestore doc id == owning user's uid
   userId: string;
@@ -21,16 +31,20 @@ export type CharacterDoc = {
   background: string | null;
   bio: string | null;
   avatarUrl: string | null;
+  alignment: string | null;
 
   level: number;
   xp: number;
   proficiencyBonus: number;
+  inspiration: boolean;
 
   maxHP: number;
   currentHP: number;
   tempHP: number;
   armorClass: number;
   speed: number;
+  hitDiceType: string; // e.g. "d8"
+  hitDiceRemaining: number;
 
   strength: number;
   dexterity: number;
@@ -38,6 +52,7 @@ export type CharacterDoc = {
   intelligence: number;
   wisdom: number;
   charisma: number;
+  savingThrowProficiencies: SavingThrowProficiencies;
 
   gold: number;
   isGoldPublic: boolean;
@@ -79,6 +94,15 @@ export type CommentDoc = {
   createdAt: number;
 };
 
+export const DEFAULT_SAVING_THROW_PROFICIENCIES: SavingThrowProficiencies = {
+  strength: false,
+  dexterity: false,
+  constitution: false,
+  intelligence: false,
+  wisdom: false,
+  charisma: false,
+};
+
 export const DEFAULT_CHARACTER: Omit<CharacterDoc, "id" | "userId" | "ownerUsername" | "updatedAt"> = {
   name: "",
   race: "",
@@ -86,20 +110,25 @@ export const DEFAULT_CHARACTER: Omit<CharacterDoc, "id" | "userId" | "ownerUsern
   background: null,
   bio: null,
   avatarUrl: null,
+  alignment: null,
   level: 1,
   xp: 0,
   proficiencyBonus: 2,
+  inspiration: false,
   maxHP: 10,
   currentHP: 10,
   tempHP: 0,
   armorClass: 10,
   speed: 30,
+  hitDiceType: "d8",
+  hitDiceRemaining: 1,
   strength: 10,
   dexterity: 10,
   constitution: 10,
   intelligence: 10,
   wisdom: 10,
   charisma: 10,
+  savingThrowProficiencies: DEFAULT_SAVING_THROW_PROFICIENCIES,
   gold: 0,
   isGoldPublic: true,
   pendingLevelUp: false,
