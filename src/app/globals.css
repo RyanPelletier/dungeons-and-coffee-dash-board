@@ -1,0 +1,39 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html {
+  color-scheme: dark;
+}
+
+body {
+  background-color: #1b1410;
+  background-image:
+    radial-gradient(circle at 20% 20%, rgba(197, 148, 60, 0.08), transparent 40%),
+    radial-gradient(circle at 80% 0%, rgba(181, 68, 46, 0.1), transparent 45%);
+  color: #f3e6cf;
+}
+
+.card {
+  @apply rounded-lg border border-gold/30 bg-nightSoft/80 shadow-lg shadow-black/40;
+}
+
+.btn {
+  @apply inline-flex items-center justify-center rounded-md px-4 py-2 font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-50;
+}
+
+.btn-primary {
+  @apply btn bg-ember text-parchment hover:bg-emberDark;
+}
+
+.btn-secondary {
+  @apply btn border border-gold/50 bg-transparent text-gold hover:bg-gold/10;
+}
+
+.input {
+  @apply w-full rounded-md border border-gold/30 bg-night px-3 py-2 text-parchment placeholder:text-parchment/40 focus:border-gold focus:outline-none;
+}
+
+.label {
+  @apply mb-1 block text-sm font-semibold uppercase tracking-wide text-gold/80;
+}
