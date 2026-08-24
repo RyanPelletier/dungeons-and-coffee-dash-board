@@ -62,10 +62,16 @@ service cloud.firestore {
 
       function ownerUpdateIsAllowed() {
         let changed = request.resource.data.diff(resource.data).affectedKeys();
+        // Note: CharacterSheetForm.save() also resends id/userId/ownerUsername
+        // unchanged on every save (for create-rule compliance if the doc was
+        // ever missing). They're deliberately left out of ownerKeys — an
+        // unchanged value never shows up in affectedKeys(), but if a request
+        // ever tried to actually change one, hasOnly() below rejects it.
         let ownerKeys = [
-          'name', 'race', 'class', 'background', 'bio', 'avatarUrl',
-          'currentHP', 'maxHP', 'tempHP', 'armorClass', 'speed',
+          'name', 'race', 'class', 'background', 'bio', 'avatarUrl', 'alignment',
+          'currentHP', 'maxHP', 'tempHP', 'armorClass', 'speed', 'hitDiceType', 'hitDiceRemaining',
           'strength', 'dexterity', 'constitution', 'intelligence', 'wisdom', 'charisma',
+          'savingThrowProficiencies', 'xp', 'inspiration',
           'gold', 'isGoldPublic', 'levelUpChecklist', 'pendingLevelUp', 'updatedAt'
         ];
         return changed.hasOnly(ownerKeys)

@@ -40,10 +40,12 @@ type PlayerSeed = {
     class: string;
     background: string;
     bio: string;
+    alignment: string;
     level: number;
     maxHP: number;
     currentHP: number;
     armorClass: number;
+    hitDiceType: string;
     gold: number;
     isGoldPublic: boolean;
     strength: number;
@@ -52,6 +54,10 @@ type PlayerSeed = {
     intelligence: number;
     wisdom: number;
     charisma: number;
+    savingThrowProficiencies: Partial<Record<
+      "strength" | "dexterity" | "constitution" | "intelligence" | "wisdom" | "charisma",
+      boolean
+    >>;
     gear: { name: string; quantity?: number; equipped?: boolean }[];
   };
 };
@@ -109,20 +115,33 @@ async function seedPlayer(seed: PlayerSeed) {
       background: c.background,
       bio: c.bio,
       avatarUrl: null,
+      alignment: c.alignment,
       level: c.level,
       xp: 0,
       proficiencyBonus: Math.floor((c.level - 1) / 4) + 2,
+      inspiration: false,
       maxHP: c.maxHP,
       currentHP: c.currentHP,
       tempHP: 0,
       armorClass: c.armorClass,
       speed: 30,
+      hitDiceType: c.hitDiceType,
+      hitDiceRemaining: c.level,
       strength: c.strength,
       dexterity: c.dexterity,
       constitution: c.constitution,
       intelligence: c.intelligence,
       wisdom: c.wisdom,
       charisma: c.charisma,
+      savingThrowProficiencies: {
+        strength: false,
+        dexterity: false,
+        constitution: false,
+        intelligence: false,
+        wisdom: false,
+        charisma: false,
+        ...c.savingThrowProficiencies,
+      },
       gold: c.gold,
       isGoldPublic: c.isGoldPublic,
       pendingLevelUp: false,
@@ -185,10 +204,12 @@ async function main() {
       class: "Bard",
       background: "Entertainer",
       bio: "A wandering storyteller with a silver tongue and a habit of collecting odd trinkets.",
+      alignment: "Chaotic Good",
       level: 3,
       maxHP: 21,
       currentHP: 21,
       armorClass: 14,
+      hitDiceType: "d8",
       gold: 45,
       isGoldPublic: true,
       strength: 8,
@@ -197,6 +218,7 @@ async function main() {
       intelligence: 10,
       wisdom: 12,
       charisma: 17,
+      savingThrowProficiencies: { dexterity: true, charisma: true },
       gear: [
         { name: "Lute", equipped: true },
         { name: "Rapier", equipped: true },
@@ -215,10 +237,12 @@ async function main() {
       class: "Fighter",
       background: "Soldier",
       bio: "Stout and stubborn, Borin has never met a door he couldn't kick down.",
+      alignment: "Lawful Neutral",
       level: 3,
       maxHP: 32,
       currentHP: 27,
       armorClass: 17,
+      hitDiceType: "d10",
       gold: 12,
       isGoldPublic: false,
       strength: 16,
@@ -227,6 +251,7 @@ async function main() {
       intelligence: 9,
       wisdom: 11,
       charisma: 8,
+      savingThrowProficiencies: { strength: true, constitution: true },
       gear: [
         { name: "Chain Mail", equipped: true },
         { name: "Battleaxe", equipped: true },
