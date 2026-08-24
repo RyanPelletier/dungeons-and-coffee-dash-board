@@ -62,9 +62,9 @@ function SessionPostContent() {
 
         {post.imageUrls.length > 0 && (
           <div className="mt-4 flex flex-wrap gap-3">
-            {post.imageUrls.map((url) => (
+            {post.imageUrls.map((url, i) => (
               // eslint-disable-next-line @next/next/no-img-element
-              <img key={url} src={url} alt="" className="max-h-80 rounded-lg object-cover" />
+              <img key={i} src={url} alt="" className="max-h-80 rounded-lg object-cover" />
             ))}
           </div>
         )}

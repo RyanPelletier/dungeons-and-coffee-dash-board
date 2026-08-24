@@ -2,31 +2,50 @@
 
 import { useRef, useState } from "react";
 
-const ALLOWED_TYPES = ["image/png", "image/jpeg", "image/gif", "image/webp"];
-const MAX_BYTES = 8 * 1024 * 1024; // 8MB
+// Images are stored inline as base64 data URIs on the Firestore document
+// itself (a deliberate free-tier choice — no external storage service).
+// Firestore caps a document at 1 MiB total, so every image has to be
+// resized/compressed client-side before it's ever added to the array, and
+// a post/comment can only hold a modest combined budget of image data.
+const ALLOWED_TYPES = ["image/png", "image/jpeg", "image/webp"];
+const MAX_ORIGINAL_FILE_BYTES = 20 * 1024 * 1024; // guard against hanging on huge originals
+const MAX_DIMENSION = 1280; // longest edge, px
+const MAX_SINGLE_IMAGE_BYTES = 700 * 1024; // ~700KB per image after compression
+const MAX_TOTAL_IMAGE_BYTES = 900 * 1024; // combined budget, leaves room for the rest of the doc
 
-const CLOUD_NAME = process.env.NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME;
-const UPLOAD_PRESET = process.env.NEXT_PUBLIC_CLOUDINARY_UPLOAD_PRESET;
-
-async function uploadToCloudinary(file: File): Promise<string> {
-  if (!CLOUD_NAME || !UPLOAD_PRESET) {
-    throw new Error("Image uploads aren't configured (missing Cloudinary env vars).");
-  }
-  const formData = new FormData();
-  formData.append("file", file);
-  formData.append("upload_preset", UPLOAD_PRESET);
-  formData.append("folder", "sessionImages");
-
-  const res = await fetch(`https://api.cloudinary.com/v1_1/${CLOUD_NAME}/image/upload`, {
-    method: "POST",
-    body: formData,
+function loadImage(file: File): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => resolve(img);
+    img.onerror = () => reject(new Error("Could not read that image file"));
+    img.src = URL.createObjectURL(file);
   });
-  if (!res.ok) {
-    const body = await res.json().catch(() => ({}));
-    throw new Error(body?.error?.message || "Upload failed");
+}
+
+async function compressToDataUri(file: File): Promise<string> {
+  const img = await loadImage(file);
+  try {
+    const scale = Math.min(1, MAX_DIMENSION / Math.max(img.width, img.height));
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.round(img.width * scale);
+    canvas.height = Math.round(img.height * scale);
+    const ctx = canvas.getContext("2d");
+    if (!ctx) throw new Error("Canvas isn't supported in this browser");
+    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+
+    let quality = 0.72;
+    let dataUri = canvas.toDataURL("image/jpeg", quality);
+    while (dataUri.length > MAX_SINGLE_IMAGE_BYTES && quality > 0.3) {
+      quality -= 0.12;
+      dataUri = canvas.toDataURL("image/jpeg", quality);
+    }
+    if (dataUri.length > MAX_SINGLE_IMAGE_BYTES) {
+      throw new Error("Image is still too large even after compression — try a smaller photo");
+    }
+    return dataUri;
+  } finally {
+    URL.revokeObjectURL(img.src);
   }
-  const data = await res.json();
-  return data.secure_url as string;
 }
 
 export default function ImageUploader({
@@ -45,19 +64,27 @@ export default function ImageUploader({
     setUploading(true);
     setError(null);
     const newUrls: string[] = [];
+    let runningTotal = urls.reduce((sum, u) => sum + u.length, 0);
+
     for (const file of Array.from(files)) {
       if (!ALLOWED_TYPES.includes(file.type)) {
-        setError("Only PNG, JPEG, GIF, or WebP images are allowed");
+        setError("Only PNG, JPEG, or WebP images are allowed (animated GIFs aren't supported)");
         continue;
       }
-      if (file.size > MAX_BYTES) {
-        setError("Image must be smaller than 8MB");
+      if (file.size > MAX_ORIGINAL_FILE_BYTES) {
+        setError("That image file is too large to process");
         continue;
       }
       try {
-        newUrls.push(await uploadToCloudinary(file));
+        const dataUri = await compressToDataUri(file);
+        if (runningTotal + dataUri.length > MAX_TOTAL_IMAGE_BYTES) {
+          setError("Adding that image would put this post over the size limit — try removing one first");
+          continue;
+        }
+        runningTotal += dataUri.length;
+        newUrls.push(dataUri);
       } catch (err) {
-        setError(err instanceof Error ? err.message : "Upload failed");
+        setError(err instanceof Error ? err.message : "Couldn't process that image");
       }
     }
     onChange([...urls, ...newUrls]);
@@ -73,7 +100,7 @@ export default function ImageUploader({
     <div>
       <div className="flex flex-wrap items-center gap-2">
         {urls.map((url, i) => (
-          <div key={url} className="relative">
+          <div key={i} className="relative">
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img src={url} alt="" className="h-16 w-16 rounded object-cover" />
             <button
@@ -92,12 +119,12 @@ export default function ImageUploader({
           disabled={uploading}
           className="btn-secondary !px-3 !py-1.5 text-xs"
         >
-          {uploading ? "Uploading..." : "Add image(s)"}
+          {uploading ? "Processing..." : "Add image(s)"}
         </button>
         <input
           ref={inputRef}
           type="file"
-          accept="image/png,image/jpeg,image/gif,image/webp"
+          accept="image/png,image/jpeg,image/webp"
           multiple
           hidden
           onChange={(e) => handleFiles(e.target.files)}

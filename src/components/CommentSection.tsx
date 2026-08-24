@@ -65,9 +65,9 @@ export default function CommentSection({
             <p className="whitespace-pre-wrap text-sm text-parchment/80">{c.content}</p>
             {c.imageUrls.length > 0 && (
               <div className="mt-2 flex flex-wrap gap-2">
-                {c.imageUrls.map((url) => (
+                {c.imageUrls.map((url, i) => (
                   // eslint-disable-next-line @next/next/no-img-element
-                  <img key={url} src={url} alt="" className="h-24 w-24 rounded object-cover" />
+                  <img key={i} src={url} alt="" className="h-24 w-24 rounded object-cover" />
                 ))}
               </div>
             )}

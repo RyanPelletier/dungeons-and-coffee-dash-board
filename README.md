@@ -6,17 +6,17 @@ leveling players, and a session-log blog with comments and art uploads.
 
 The app is a fully static Next.js export (no server, no API routes) backed
 directly by **Firebase** — Firestore for data and Firebase Auth for
-accounts — plus **Cloudinary** for image uploads. That combination is what
-lets it be hosted for free on **GitHub Pages**: the static HTML/JS talks to
-Firebase and Cloudinary straight from the browser, and Firestore
+accounts. That's what lets it be hosted for free on **GitHub Pages**: the
+static HTML/JS talks to Firebase straight from the browser, and Firestore
 **security rules** (`firestore.rules`) are the only access-control
 boundary, since there's no backend to enforce anything server-side.
 
-Images go through Cloudinary rather than Firebase Storage on purpose:
+There's no third-party storage service for images, on purpose: Firebase
 Storage has required the paid Blaze plan just to provision a bucket since
-late 2024 (even though usage within the free tier still costs $0), while
-both Firestore's Spark plan and Cloudinary's free tier need no card on
-file at all.
+late 2024 (even though usage within the free tier still costs $0), so
+uploads are stored **inline as base64 on the Firestore document itself** —
+Firestore's free Spark plan needs no card on file at all. See
+`src/components/ImageUploader.tsx` and the tradeoffs this forces, below.
 
 ## Features
 
@@ -33,11 +33,10 @@ file at all.
 - **DM Dashboard** (`/dm`) — change player levels and assign the scribe.
 - **Session Log** (`/sessions`) — a blog of session recaps. Only the scribe
   (or the DM) can write the main post; any signed-in player can comment.
-  Both posts and comments support optional image uploads to Cloudinary.
+  Both posts and comments support optional image uploads (resized and
+  stored inline — see tradeoffs below).
 
 ## One-time setup
-
-**Firebase** (data + auth):
 
 1. Create a project at [console.firebase.google.com](https://console.firebase.google.com).
 2. **Build → Authentication → Sign-in method** → enable **Email/Password**.
@@ -55,19 +54,9 @@ file at all.
    self-registration always creates a `PLAYER`, by design, so someone has to
    be promoted to DM out-of-band.
 
-**Cloudinary** (image uploads):
-
-1. Create a free account at [cloudinary.com](https://cloudinary.com) — no
-   card required.
-2. **Settings → Upload → Upload presets → Add upload preset**, set
-   **Signing Mode** to **Unsigned**, save it, and note the preset name.
-3. Copy your **Cloud name** (shown on the Cloudinary dashboard) and the
-   preset name into `.env` as `NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME` and
-   `NEXT_PUBLIC_CLOUDINARY_UPLOAD_PRESET`.
-
-Neither of these values is a secret — an unsigned preset is designed to be
-called straight from browser JS — so it's fine that they end up in the
-built bundle.
+That's it — no other service to configure. Image uploads run entirely in
+the browser (resize + compress + base64-encode), so there's nothing to set
+up for them.
 
 ## Local development
 
@@ -86,10 +75,8 @@ npm run seed                   # terminal 2 — seeds a DM + two sample players 
 npm run dev                    # terminal 2 — http://localhost:3000
 ```
 
-Image uploads go straight to Cloudinary even in local dev (there's no
-emulator for it), so you'll need real `NEXT_PUBLIC_CLOUDINARY_*` values in
-`.env` to test that specific feature — everything else works fully offline
-against the emulators.
+Image uploads never leave the browser except to write to Firestore, so
+they work fully offline against the emulators too — no extra setup needed.
 
 Seeded accounts:
 
@@ -107,10 +94,9 @@ To seed a **real** project instead of the emulators: set
 
 1. In the repo's **Settings → Pages**, set **Source** to **GitHub Actions**.
 2. Add these repository secrets (**Settings → Secrets and variables →
-   Actions**): from your Firebase web app config —
+   Actions**), from your Firebase web app config:
    `FIREBASE_API_KEY`, `FIREBASE_AUTH_DOMAIN`, `FIREBASE_PROJECT_ID`,
-   `FIREBASE_MESSAGING_SENDER_ID`, `FIREBASE_APP_ID` — and from Cloudinary —
-   `CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_UPLOAD_PRESET`.
+   `FIREBASE_MESSAGING_SENDER_ID`, `FIREBASE_APP_ID`.
 3. Push to `main`. `.github/workflows/deploy.yml` builds the static export
    (`NEXT_BASE_PATH` is set automatically to `/<repo-name>`) and publishes
    it to Pages.
@@ -127,12 +113,25 @@ NEXT_BASE_PATH=/dungeons-and-coffee-dash-board npm run build   # outputs to ./ou
   browser to Firebase, authorized by `firestore.rules`. Read that file to
   see exactly what's enforced (only the DM can change
   `level`/`pendingLevelUp`, only the scribe/DM can create session posts,
-  players can only edit their own character, etc.). Image uploads go to
-  Cloudinary via an unsigned preset, which has no equivalent per-field rule
-  engine — anyone with the (non-secret) cloud name and preset name can
-  upload to that preset. Fine for a private hobby app; if that ever
-  matters, Cloudinary lets you cap the preset (file size/type, folder,
-  moderation) from its dashboard.
+  players can only edit their own character, etc.).
+- **Images are base64 data URIs stored directly on the post/comment
+  document** — no separate storage service at all. This works, but runs
+  straight into Firestore's **1 MiB per-document hard limit**:
+  - `ImageUploader.tsx` resizes every image to a ~1280px longest edge and
+    re-encodes it as JPEG, iterating the quality down until it's under
+    ~700KB; if it still doesn't fit, the upload is rejected with an error
+    rather than silently failing.
+  - Each post/comment has a combined image budget of ~900KB, enforced
+    client-side — add enough photos and it'll tell you to remove one
+    before you can add another.
+  - Animated GIFs don't survive this pipeline (canvas re-encoding
+    flattens them to one static frame), so GIF is intentionally excluded
+    from the accepted file types.
+  - Every page that lists posts or characters downloads the full image
+    payload for everything on it (there's no CDN, no lazy loading, no
+    browser-cacheable separate image URLs) — fine for a small private
+    campaign, but this won't scale gracefully to a large, image-heavy
+    campaign the way a real image host would.
 - **Gold visibility is a UI toggle, not a hard security boundary.**
   Firestore can't hide individual fields from a document read, so a
   player's "hide my gold" setting only hides it in the campaign dashboard
